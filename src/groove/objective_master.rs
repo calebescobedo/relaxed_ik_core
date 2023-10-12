@@ -66,6 +66,50 @@ impl ObjectiveMaster {
         Self{objectives, num_chains, weight_priors, lite: false, finite_diff_grad: false}
     }
 
+    pub fn HIRO_ik(chain_lengths: &[usize]) -> Self {
+        let mut objectives: Vec<Box<dyn ObjectiveTrait + Send>> = Vec::new();
+        let mut weight_priors: Vec<f64> = Vec::new();
+        let num_chains = chain_lengths.len();
+        let mut num_dofs = 0;
+        for i in 0..num_chains {
+            objectives.push(Box::new(HIROMatchEEPosiDoF::new(i, 0)));
+            weight_priors.push(50.0);
+            objectives.push(Box::new(HIROMatchEEPosiDoF::new(i, 1)));
+            weight_priors.push(50.0);
+            objectives.push(Box::new(HIROMatchEEPosiDoF::new(i, 2)));
+            weight_priors.push(50.0);
+            objectives.push(Box::new(MatchEEQuatGoals::new(i)));
+            weight_priors.push(20.0);
+            num_dofs += chain_lengths[i];
+        }
+
+        // first one stay inside the cone/circle samples
+        // objectives.push(Box::new(MatchCone::new(0, 0)));
+        // weight_priors.push(5.0);
+        // second matching the height/going to the point of the cone
+        // objectives.push(Box::new(MatchConeZ::new(0, 0)));
+        // weight_priors.push(15.0);
+
+        for j in 0..num_dofs {
+            objectives.push(Box::new(EachJointLimits::new(j))); weight_priors.push(0.1);
+        }
+
+        objectives.push(Box::new(MinimizeVelocity));   weight_priors.push(0.7);
+        objectives.push(Box::new(MinimizeAcceleration));    weight_priors.push(0.5);
+        objectives.push(Box::new(MinimizeJerk));    weight_priors.push(0.3);
+        objectives.push(Box::new(MaximizeManipulability));    weight_priors.push(1.0);
+
+        for i in 0..num_chains {
+            for j in 0..chain_lengths[i]-2 {
+                for k in j+2..chain_lengths[i] {
+                    objectives.push(Box::new(SelfCollision::new(0, j, k))); weight_priors.push(0.01 );
+                }
+            }
+        }
+        
+        Self{objectives, num_chains, weight_priors, lite: false, finite_diff_grad: false}
+    }
+
     pub fn call(&self, x: &[f64], vars: &RelaxedIKVars) -> f64 {
         if self.lite {
             self.__call_lite(x, vars)

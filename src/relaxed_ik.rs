@@ -15,7 +15,11 @@ pub struct Opt {
 pub struct RelaxedIK {
     pub vars: RelaxedIKVars,
     pub om: ObjectiveMaster,
-    pub groove: OptimizationEngineOpen
+    pub groove: OptimizationEngineOpen,
+    pub radius: f64,
+    pub height: f64,
+    pub obj_to_center_line: f64,
+    pub start_cone: f64
 }
 
 impl RelaxedIK {
@@ -23,11 +27,17 @@ impl RelaxedIK {
         println!("RelaxedIK is using below setting file {}", path_to_setting);
 
         let vars = RelaxedIKVars::from_local_settings(path_to_setting);
-        let om = ObjectiveMaster::relaxed_ik(&vars.robot.chain_lengths);
+        // let om = ObjectiveMaster::relaxed_ik(&vars.robot.chain_lengths);
+        let om = ObjectiveMaster::HIRO_ik(&vars.robot.chain_lengths);
 
         let groove = OptimizationEngineOpen::new(vars.robot.num_dofs.clone());
 
-        Self{vars, om, groove}
+        let radius = 0.0;
+        let height = 0.0;
+        let obj_to_center_line = 0.0;
+        let start_cone = 0.0;
+
+        Self{vars, om, groove, radius, height, obj_to_center_line, start_cone}
     }
 
     pub fn reset(&mut self, x: Vec<f64>) {

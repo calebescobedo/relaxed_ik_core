@@ -3,10 +3,31 @@ use crate::utils_rust::transformations::{*};
 use nalgebra::geometry::{Translation3, UnitQuaternion, Quaternion};
 use std::cmp;
 use crate::groove::vars::RelaxedIKVars;
-use nalgebra::{Vector3, Isometry3, Point3};
+use nalgebra::{Vector3, Isometry3, Point3, Matrix3x1};
 use std::ops::Deref;
 use time::PreciseTime;
 use parry3d_f64::{shape, query};
+use libm;
+use core::f64::consts::PI;
+
+
+// 1. x_val = x_value
+// 2. t = y_shift
+// 3. d = gauss region pow 2 in starting paper
+// 4. c = spread of gauss region
+// 5. f = connection between polynomial and gauss regions
+// 6. g = poly region spread, 4 in RelaxedIK, 2 in RangedIK
+
+// let y_shift = 0.0;
+// let gauss_pow = 1;
+// let gauss_spread = 1.0;
+// let connection = 1.0;
+// let poly_spread = 1;
+// if (!curr_cone_height.is_nan()){
+//     curr_cone_height = curr_cone_height;
+// }
+// let mut z_cone_loss = groove_loss(curr_cone_height, y_shift, gauss_pow, 
+//                               gauss_spread, connection, poly_spread);
 
 pub fn groove_loss(x_val: f64, t: f64, d: i32, c: f64, f: f64, g: i32) -> f64 {
     -( (-(x_val - t).powi(d)) / (2.0 * c.powi(2) ) ).exp() + f * (x_val - t).powi(g)
@@ -15,7 +36,16 @@ pub fn groove_loss(x_val: f64, t: f64, d: i32, c: f64, f: f64, g: i32) -> f64 {
 pub fn groove_loss_derivative(x_val: f64, t: f64, d: i32, c: f64, f: f64, g: i32) -> f64 {
     -( (-(x_val - t).powi(d)) / (2.0 * c.powi(2) ) ).exp() *  ((-d as f64 * (x_val - t)) /  (2.0 * c.powi(2))) + g as f64 * f * (x_val - t)
 }
-
+// HIRO funnly swamp loss
+// 1. x_val
+// 2. offset = 0.0
+// 3. -bound
+// 4. bound
+// 5. 2.0 * bound
+// 6. f1 = 1.0
+// 7. f2 = 0.001
+// 8. f3 = 100.0
+// 9. p1 = 20
 pub fn swamp_groove_loss(x_val: f64, g:f64, l_bound: f64, u_bound: f64, c : f64, f1: f64, f2: f64, f3:f64, p1:i32) -> f64 {
     let x = (2.0 * x_val - l_bound - u_bound) / (u_bound - l_bound);
     let b = (-1.0 / (0.05 as f64).ln()).powf(1.0 / p1 as f64);
@@ -90,6 +120,44 @@ impl ObjectiveTrait for MatchEEPosiDoF {
         let goal_quat = v.goal_quats[self.arm_idx];
         // E_{gc} = R_{gw} * T_{gw} * T_{wc} * R_{wc}, R_{wc} won't matter since we are only interested in the translation
         // so  we get: T_{gc} = R_{gw} * T_{gw} * T_{wc}
+        let T_gw_T_wc =  nalgebra::Vector3::new(    frames[self.arm_idx].0[last_elem].x - v.goal_positions[self.arm_idx].x, 
+                                                    frames[self.arm_idx].0[last_elem].y - v.goal_positions[self.arm_idx].y, 
+                                                    frames[self.arm_idx].0[last_elem].z - v.goal_positions[self.arm_idx].z );
+
+        let T_gc = goal_quat.inverse() * T_gw_T_wc;
+ 
+        let dist: f64 = T_gc[self.axis];
+
+        let bound =  v.tolerances[self.arm_idx][self.axis];
+
+        if (bound <= 1e-2) {
+            groove_loss(dist, 0., 2, 0.1, 10.0, 2)
+        } else {
+            swamp_groove_loss(dist, 0.0, -bound, bound, bound*2.0, 1.0, 0.01, 100.0, 20) 
+        }
+    }
+    fn call_lite(&self, x: &[f64], v: &vars::RelaxedIKVars, ee_poses: &Vec<(nalgebra::Vector3<f64>, nalgebra::UnitQuaternion<f64>)>) -> f64 {
+        let x_val = ( ee_poses[self.arm_idx].0 - v.goal_positions[self.arm_idx] ).norm();
+        groove_loss(x_val, 0., 2, 0.1, 10.0, 2)
+    }
+}
+
+pub struct HIROMatchEEPosiDoF {
+    pub arm_idx: usize,
+    pub axis: usize
+}
+impl HIROMatchEEPosiDoF {
+    pub fn new(arm_idx: usize, axis: usize) -> Self {Self{arm_idx, axis}}
+}
+impl ObjectiveTrait for HIROMatchEEPosiDoF {
+    fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
+        
+        if (v.start_cone > 0.0){
+            return 0.0;
+        }
+        
+        let last_elem = frames[self.arm_idx].0.len() - 1;
+        let goal_quat = v.goal_quats[self.arm_idx];
         let T_gw_T_wc =  nalgebra::Vector3::new(    frames[self.arm_idx].0[last_elem].x - v.goal_positions[self.arm_idx].x, 
                                                     frames[self.arm_idx].0[last_elem].y - v.goal_positions[self.arm_idx].y, 
                                                     frames[self.arm_idx].0[last_elem].z - v.goal_positions[self.arm_idx].z );
@@ -409,6 +477,221 @@ impl ObjectiveTrait for MatchEEQuatGoals {
         let disp = angle_between_quaternion(v.goal_quats[self.arm_idx], ee_poses[self.arm_idx].1);
         let disp2 = angle_between_quaternion(v.goal_quats[self.arm_idx], ee_quat2);
         let x_val = disp.min(disp2);
+        groove_loss(x_val, 0., 2, 0.1, 10.0, 2)
+    }
+}
+
+pub fn line_dist(fr_xyz: &nalgebra::Vector3<f64>, g_xyz: &nalgebra::Vector3<f64>, a_xyz: &nalgebra::Vector3<f64>) -> f64 {
+    // p = fr_xyz
+    // a = g_xyz
+    // b = a_xyz
+    let p_a = fr_xyz - g_xyz;
+    let temp_sub = a_xyz - g_xyz;
+    let temp_norm = (temp_sub).norm();
+    let mut tan_norm = [0.0, 0.0, 0.0];
+
+    for x in 0..3 
+    {
+        tan_norm[x] = temp_sub[x] / temp_norm;
+    }
+
+    
+    let temp = Matrix3x1::new(tan_norm[0], tan_norm[1], tan_norm[2]);
+    
+    let dot_s = (g_xyz - fr_xyz).dot(&temp);
+    let dot_t = (fr_xyz - a_xyz).dot(&temp);
+
+    let mut max = 0.0;
+    if max < dot_s
+    {
+        max = dot_s;
+    }
+
+    if max < dot_t
+    {
+        max = dot_t;
+    }
+    
+    let c = p_a.cross(&temp);
+
+    let c_norm = c.norm();
+    let mut hypot = c_norm.powf(2.0) + max.powf(2.0);
+    hypot = hypot.sqrt();
+
+    return hypot.abs();
+}
+
+pub fn get_degrees(rad: f64) -> f64 {
+    rad * (180.0 / PI)
+}
+
+pub fn find_ee_height(v: &vars::RelaxedIKVars, fr_xyz: &nalgebra::Vector3<f64>, g_xyz: &nalgebra::Vector3<f64>, a_xyz: &nalgebra::Vector3<f64>) -> (f64, f64, f64) {
+    let mut cone_theta = libm::atan2(v.radius, v.height);
+    cone_theta = get_degrees(cone_theta);
+    let robo_radius = line_dist(&fr_xyz, &g_xyz, &a_xyz);
+
+    let robo_hypot = (fr_xyz - g_xyz).norm();
+    let temp_theta = libm::asin(robo_radius / robo_hypot); 
+    let new_height = libm::cos(temp_theta) * robo_hypot;
+    let curr_radius = libm::tan(cone_theta) * new_height;
+
+    // println!("new_height {}\n curr_radius {}", new_height, curr_radius);
+
+    return (new_height, curr_radius, robo_radius);
+
+}
+
+pub struct MatchCone {
+    pub arm_idx: usize,
+    pub axis: usize,
+}
+
+impl MatchCone {
+    pub fn new(arm_idx: usize, axis: usize) -> Self {Self{arm_idx, axis}}
+}
+
+impl ObjectiveTrait for MatchCone {
+    fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
+        let obj_to_center = v.obj_to_center_line;
+        let start_cone = v.start_cone;
+        let last_elem = frames[self.arm_idx].0.len() - 1;
+        let x_a = nalgebra::Vector3::new(v.x_a[0], v.x_a[1], v.x_a[2]);
+        let x_g = nalgebra::Vector3::new(v.x_g[0], v.x_g[1], v.x_g[2]);
+        let fr_xyz = nalgebra::Vector3::new(frames[self.arm_idx].0[last_elem].x, frames[self.arm_idx].0[last_elem].y, frames[self.arm_idx].0[last_elem].z);
+        let (curr_cone_height, curr_cone_radius, robo_radius) = find_ee_height(v, &fr_xyz, &x_g, &x_a);
+
+
+
+        let offset = 0.0;
+
+        if(v.start_cone > 0.0){
+            let l_bound = -curr_cone_radius.abs();
+            let u_bound = curr_cone_radius.abs();
+            let x_val = robo_radius;
+            let mut cone_loss = 0.0;
+            if (u_bound <= 1e-2) {
+                cone_loss = groove_loss(x_val, offset, 2, 0.1, 10.0, 2);
+            } else {
+                cone_loss = swamp_groove_loss(x_val, offset, l_bound, u_bound, u_bound*2.0, 1.0, 0.01, 100.0, 20);
+            }
+            // println!("cone_loss: {}  curr_cone_height {}", cone_loss, curr_cone_height);                          
+            if (cone_loss.is_nan()){
+                return 100.0;
+            }else{
+                
+                return cone_loss;
+            }
+        }else{
+            return 100.0
+        }
+
+    }
+    fn call_lite(&self, x: &[f64], v: &vars::RelaxedIKVars, ee_poses: &Vec<(nalgebra::Vector3<f64>, nalgebra::UnitQuaternion<f64>)>) -> f64 {
+        let x_val = ( ee_poses[self.arm_idx].0 - v.goal_positions[self.arm_idx] ).norm();
+        groove_loss(x_val, 0., 2, 0.1, 10.0, 2)
+    }
+}
+
+pub fn check_xyz_change(x_hist: &[f64], y_hist: &[f64], z_hist: &[f64]) -> f64 {
+    let mut sum = 0.0;
+    for idx in 0..49{
+        sum += f64::sqrt((x_hist[idx + 1] - x_hist[idx]).powf(2.0) + 
+                         (y_hist[idx + 1] - y_hist[idx]).powf(2.0) + 
+                         (z_hist[idx + 1] - z_hist[idx]).powf(2.0));
+    }
+    let avg = sum/50.0;
+    return avg
+}
+
+pub struct MatchConeZ {
+    pub arm_idx: usize,
+    pub axis: usize,
+}
+
+impl MatchConeZ {
+    pub fn new(arm_idx: usize, axis: usize) -> Self {Self{arm_idx, axis}}
+}
+
+impl ObjectiveTrait for MatchConeZ {
+    fn call(&self, x: &[f64], v: &vars::RelaxedIKVars, frames: &Vec<(Vec<nalgebra::Vector3<f64>>, Vec<nalgebra::UnitQuaternion<f64>>)>) -> f64 {
+        let nan = f64::NAN;
+        let start_cone = v.start_cone;
+        let last_elem = frames[self.arm_idx].0.len() - 1;
+        let x_a = nalgebra::Vector3::new(v.x_a[0], v.x_a[1], v.x_a[2]);
+        let x_g = nalgebra::Vector3::new(v.x_g[0], v.x_g[1], v.x_g[2]);
+        let fr_xyz = nalgebra::Vector3::new(frames[self.arm_idx].0[last_elem].x, frames[self.arm_idx].0[last_elem].y, frames[self.arm_idx].0[last_elem].z);
+        let x_hist = v.x_hist.clone();
+        let y_hist = v.y_hist.clone();
+        let z_hist = v.z_hist.clone();
+        let max_f = 30;
+        let (mut curr_cone_height, curr_cone_radius, robo_radius) = find_ee_height(v, &fr_xyz, &x_g, &x_a);
+        
+
+        if(v.start_cone > 0.0){
+            let mut pose_change = 100.0;
+            if x_hist.len() == 50{
+                pose_change = check_xyz_change(&x_hist, &y_hist, &z_hist);
+                // println!("Pose Change {}", pose_change);
+            }
+            let y_shift = 0.0;
+            let gauss_pow = 1;
+            let gauss_spread = 1.0;
+            let connection = 1.0;
+            let poly_spread = 1;
+
+            let y_offset = 0.0;
+            let l_bound = 0.0;
+            let mut u_bound = v.height;
+            let x_val = curr_cone_height;
+            
+            let mut z_cone_loss = 0.0;
+        
+            // pub fn groove_loss(x_val: f64, t: f64, d: i32, c: f64, f: f64, g: i32) -> f64 
+            // pub fn swamp_groove_loss(x_val: f64, g:f64, l_bound: f64, u_bound: f64, c : f64, f1: f64, f2: f64, f3:f64, p1:i32) -> f64 
+            let mut d = 12;
+            let threshold = 0.001;
+            let min = 0.00002;
+            let mut f_temp = v.f;
+            let mut f2_temp = 0.01;
+
+
+            
+        
+            if (x_val < 0.15){           
+                if pose_change < 0.001{
+                    if pose_change < 0.00002{
+                        pose_change = 0.00002;
+                    }
+                    f_temp = 10.0 + ((50.0 - 10.0) / (0.00002 - 0.001)) * (pose_change - 0.001);            
+                } 
+                z_cone_loss = groove_loss(x_val, y_offset, d, 0.1, f_temp, 2);
+            }else{
+                // if pose_change < 0.001{
+                //     if pose_change < 0.00002{
+                //         pose_change = 0.00002;
+                //     }
+                //     f2_temp = 0.01 + ((50.0 - 0.01) / (0.00002 - 0.001)) * (pose_change - 0.001);            
+                // }
+                z_cone_loss = swamp_groove_loss(x_val, y_offset, 
+                    l_bound, u_bound, u_bound*2.0, 1.0, f2_temp, 100.0, 20);
+            }
+
+            if (!z_cone_loss.is_nan()){
+                // println!("Z_cone_loss: {}  curr_cone_Z_height {}", z_cone_loss, curr_cone_height);     
+                return z_cone_loss                                
+            }                                          
+            if (z_cone_loss.is_nan()){
+                // println!("NAN for Z-Height");
+                return 100.0
+            }
+            return z_cone_loss;
+        }else{
+            return 100.0
+        }
+
+    }
+    fn call_lite(&self, x: &[f64], v: &vars::RelaxedIKVars, ee_poses: &Vec<(nalgebra::Vector3<f64>, nalgebra::UnitQuaternion<f64>)>) -> f64 {
+        let x_val = ( ee_poses[self.arm_idx].0 - v.goal_positions[self.arm_idx] ).norm();
         groove_loss(x_val, 0., 2, 0.1, 10.0, 2)
     }
 }

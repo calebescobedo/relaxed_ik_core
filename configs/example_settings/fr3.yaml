@@ -1,8 +1,8 @@
 urdf: fr3.urdf
 link_radius: 0.05 
 base_links:
-  - fr3_link0
+  - panda_link0
 ee_links:
-  - fr3_link8
+  - panda_hand
 starting_config: [5.2823e-05, -0.7841, -0.0001, -2.355, 0.00280, 1.57, 0.790]
 obstacles:

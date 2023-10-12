@@ -30,7 +30,17 @@ pub struct RelaxedIKVars {
     pub goal_quats: Vec<UnitQuaternion<f64>>,
     pub tolerances: Vec<Vector6<f64>>,
     pub init_ee_positions: Vec<Vector3<f64>>,
-    pub init_ee_quats: Vec<UnitQuaternion<f64>>
+    pub init_ee_quats: Vec<UnitQuaternion<f64>>,
+    pub radius: f64,
+    pub height: f64,
+    pub obj_to_center_line: f64,
+    pub start_cone: f64,
+    pub x_a: Vec<f64>,
+    pub x_g: Vec<f64>,
+    pub x_hist: Vec<f64>,
+    pub y_hist: Vec<f64>,
+    pub z_hist: Vec<f64>,
+    pub f: f64
 }
 impl RelaxedIKVars {
     pub fn from_local_settings(path_to_setting: &str) -> Self {
@@ -83,11 +93,21 @@ impl RelaxedIKVars {
             init_ee_positions.push(pose[i].0);
             init_ee_quats.push(pose[i].1);
         }
+        let radius = 0.0;
+        let height = 0.0;
+        let obj_to_center_line = 0.0;
+        let start_cone = 0.0;
+        let x_a = Vec::from([0.0, 0.0, 0.0]);
+        let x_g = Vec::from([0.0, 0.0, 0.0]);
+        let x_hist = Vec::from([]);
+        let y_hist = Vec::from([]);
+        let z_hist = Vec::from([]);
+        let mut f = 10.0;
 
         RelaxedIKVars{robot, init_state: starting_config.clone(), xopt: starting_config.clone(),
             prev_state: starting_config.clone(), prev_state2: starting_config.clone(), prev_state3: starting_config.clone(),
-            goal_positions: init_ee_positions.clone(), goal_quats: init_ee_quats.clone(), tolerances, init_ee_positions, init_ee_quats}
-    }
+            goal_positions: init_ee_positions.clone(), goal_quats: init_ee_quats.clone(), tolerances, init_ee_positions, init_ee_quats,
+            radius, height, obj_to_center_line, start_cone, x_a, x_g, x_hist, y_hist, z_hist, f}    }
     
     // for webassembly
     pub fn from_jsvalue( configs: VarsConstructorData, urdf: &str) -> Self  {
@@ -111,9 +131,22 @@ impl RelaxedIKVars {
             init_ee_quats.push(pose[i].1);
         }
 
+        let radius = 0.0;
+        let height = 0.0;
+        let obj_to_center_line = 0.0;
+        let start_cone = 0.0;
+        let x_a = Vec::from([0.0, 0.0, 0.0]);
+        let x_g = Vec::from([0.0, 0.0, 0.0]);
+
+        let x_hist = Vec::from([]);
+        let y_hist = Vec::from([]);
+        let z_hist = Vec::from([]);
+        let mut f = 10.0;
+
         RelaxedIKVars{robot, init_state: configs.starting_config.clone(), xopt: configs.starting_config.clone(),
             prev_state: configs.starting_config.clone(), prev_state2: configs.starting_config.clone(), prev_state3: configs.starting_config.clone(),
-            goal_positions: init_ee_positions.clone(), goal_quats: init_ee_quats.clone(), tolerances, init_ee_positions, init_ee_quats}
+            goal_positions: init_ee_positions.clone(), goal_quats: init_ee_quats.clone(), tolerances, init_ee_positions, init_ee_quats,
+            radius, height, obj_to_center_line, start_cone, x_a, x_g, x_hist, y_hist, z_hist, f}
 
     }
 
