@@ -84,11 +84,11 @@ impl ObjectiveMaster {
         }
 
         // first one stay inside the cone/circle samples
-        // objectives.push(Box::new(MatchCone::new(0, 0)));
-        // weight_priors.push(5.0);
+        objectives.push(Box::new(MatchCone::new(0, 0)));
+        weight_priors.push(5.0);
         // second matching the height/going to the point of the cone
-        // objectives.push(Box::new(MatchConeZ::new(0, 0)));
-        // weight_priors.push(15.0);
+        objectives.push(Box::new(MatchConeZ::new(0, 0)));
+        weight_priors.push(15.0);
 
         for j in 0..num_dofs {
             objectives.push(Box::new(EachJointLimits::new(j))); weight_priors.push(0.1);
