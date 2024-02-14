@@ -315,8 +315,8 @@ fn hiro_solve_velocity_helper(relaxed_ik: &mut RelaxedIK, pos_vels: Vec<f64>, qu
         let axis = Unit::new_normalize(Vector3::new(-quat_line[3*i], -quat_line[3*i+1], -quat_line[3*i+2]));
         let rot = UnitQuaternion::from_axis_angle(&axis, 0.785398);
         let corrected_quat = rot * quaternion1;
-        // relaxed_ik.vars.goal_quats[i] =  quaternion1;
-        relaxed_ik.vars.goal_quats[i] =  corrected_quat;
+        relaxed_ik.vars.goal_quats[i] =  quaternion1;
+        // relaxed_ik.vars.goal_quats[i] =  corrected_quat;
         relaxed_ik.vars.tolerances[i] = Vector6::new( tolerance[3*i], tolerance[3*i+1], tolerance[3*i+2],
             tolerance[3*i+3], tolerance[3*i+4], tolerance[3*i+5])
     }
